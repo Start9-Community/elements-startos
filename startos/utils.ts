@@ -1,24 +1,22 @@
+import { utils } from '@start9labs/start-sdk'
+import * as diskusage from 'diskusage'
+import { totalmem } from 'os'
 import { sdk } from './sdk'
 
 /**
- * Shared constants and helpers for the Elements (Liquid) package.
- *
- * DEPENDENCY CONTRACT (read by sibling packages such as peerswap-startos):
- *   - hostname:      elements.startos
- *   - rpc port:      7041            (Liquid mainnet `liquidv1` default)
- *   - cookie file:   <datadir>/liquidv1/.cookie
- *   - mount:         a dependent mounts the `main` volume read-only and finds
- *                    the cookie at  <mountpoint>/liquidv1/.cookie
- *                    e.g. mountpoint /mnt/elements  ->  /mnt/elements/liquidv1/.cookie
- *   - wallet:        `peerswap` (pre-created by this package on first run)
- *
- * The cookie file format is  __cookie__:<password>  and is what elements-cli
- * uses for `-rpccookiefile`. A dependent can either read the cookie directly
- * or use the rpcuser/rpcpassword written into the config (see below).
+ * Shared constants and helpers for the Elements (Liquid) package. The
+ * cross-package dependency contract these values define is documented in
+ * README.md § The Dependency Contract.
  */
 
 export const chain = 'liquidv1'
+
+// Exported for dependent packages: `sdk.host.getBridgeAddress` keys off the
+// host id + internal port to resolve the address they reach this node at.
+export const rpcHostId = 'rpc'
+export const peerHostId = 'peer'
 export const rpcInterfaceId = 'rpc'
+export const peerInterfaceId = 'peer'
 
 // Liquid mainnet (liquidv1) RPC default port
 export const rpcPort = 7041
@@ -44,6 +42,25 @@ export const rpcallowip = '0.0.0.0/0'
 
 // Wallet pre-created for peerswap and other Liquid consumers.
 export const defaultWallet = 'peerswap'
+
+export const diskUsage = utils.once(() => diskusage.check('/'))
+
+/**
+ * Disk below which an unpruned Liquid node is not a responsible default. The
+ * chain is ~90 GB and adding tens of GB a year; this leaves room for it to
+ * roughly double alongside whatever else the box runs.
+ */
+export const archivalMin = 400_000_000_000
+
+/** elementsd's floor for `prune`, inherited from Bitcoin Core. */
+export const minPrune = 550
+
+/** Free space below which the node is at real risk of wedging mid-sync. */
+export const diskCriticalBytes = 5_000_000_000
+export const diskWarningBytes = 20_000_000_000
+
+export const defaultDbcache = () =>
+  Math.min(Math.floor((totalmem() * 0.15) / (1024 * 1024)), 2_048)
 
 export const elementsMounts = sdk.Mounts.of().mountVolume({
   volumeId: 'main',

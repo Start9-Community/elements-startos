@@ -18,15 +18,22 @@ needs a Liquid node can depend on it.
 
 It exposes:
 
-- A **JSON-RPC interface** on the StartOS internal network at
-  `elements.startos:7041`.
+- A **JSON-RPC interface**, which dependent packages resolve over the StartOS
+  internal bridge rather than by hostname.
 - A **`peerswap` wallet**, pre-created on first run.
-- An **RPC cookie** that dependent packages can mount and read.
+- An **RPC cookie** that dependent packages mount read-only and read.
 
 ## Standalone Liquid node (no peg-in validation)
 
 This package runs with `validatepegin=0`, meaning it does **not** run an
-embedded Bitcoin Core to validate Liquid peg-ins against the Bitcoin chain.
-This keeps the resource footprint small (you do not need a synced Bitcoin node
-alongside it) while still running a full, validating Liquid node. This is the
-correct mode for swap/wallet use cases such as PeerSwap.
+embedded Bitcoin Core to validate Liquid peg-ins against the Bitcoin chain. It
+therefore needs no synced Bitcoin node alongside it, while still running a full,
+validating Liquid node. This is the correct mode for swap and wallet use cases
+such as PeerSwap.
+
+## Disk
+
+The Liquid sidechain is well past 80 GB and growing by tens of GB a year.
+Pruning is available from the Configuration action and is the default on hosts
+whose disk cannot hold an archival node; a `Disk Space` health check warns
+before free space runs out.

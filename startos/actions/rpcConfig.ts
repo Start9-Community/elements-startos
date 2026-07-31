@@ -15,6 +15,8 @@ export const rpcConfig = sdk.Action.withInput(
   }),
 
   fullConfigSpec.filter({
+    prune: true,
+    txindex: true,
     dbcache: true,
     rpcthreads: true,
     rpcworkqueue: true,
