@@ -2,8 +2,12 @@ import { FileHelper, T, z } from '@start9labs/start-sdk'
 import { i18n } from '../i18n'
 import { sdk } from '../sdk'
 import {
+  archivalMin,
   chain,
+  defaultDbcache,
   defaultWallet,
+  diskUsage,
+  minPrune,
   rpcallowip,
   rpcbind,
   rpccookiefile,
@@ -39,7 +43,7 @@ const iniBoolean = z
  *
  * Enforced (not user-editable) keys keep the node reachable from the StartOS
  * internal network and pin it to the Liquid mainnet sidechain:
- *   chain=liquidv1, server=1, listen=1, txindex=1, validatepegin=0,
+ *   chain=liquidv1, server=1, listen=1, validatepegin=0,
  *   rpcbind=0.0.0.0, rpcallowip=0.0.0.0/0, rpcport=7041, rpccookiefile=.cookie
  *
  * `rpcuser`/`rpcpassword` are optional: when present they let a dependent
@@ -51,7 +55,6 @@ export const shape = z.object({
   chain: z.literal(chain).catch(chain),
   server: z.literal(true).catch(true),
   listen: z.literal(true).catch(true),
-  txindex: z.literal(true).catch(true),
   validatepegin: z.literal(false).catch(false),
   rpcbind: z.literal(rpcbind).catch(rpcbind),
   rpcallowip: z.literal(rpcallowip).catch(rpcallowip),
@@ -63,6 +66,16 @@ export const shape = z.object({
   rpcpassword: iniString,
 
   // User-tunable
+  prune: z
+    .union([
+      z.array(z.string()).transform((a) => Number(a.at(-1))),
+      z.string().transform(Number),
+      z.number(),
+    ])
+    .transform((v) => (v > 0 && v < minPrune ? minPrune : v))
+    .optional()
+    .catch(undefined),
+  txindex: iniBoolean,
   dbcache: iniNumber,
   rpcthreads: iniNumber,
   rpcworkqueue: iniNumber,
@@ -76,6 +89,40 @@ const { InputSpec, Value } = sdk
 
 export const fullConfigSpec = sdk.InputSpec.of({
   raw: Value.hidden(shape),
+  prune: Value.dynamicNumber(async ({ effects }) => {
+    const disk = await diskUsage()
+    const smallDisk = disk.total < archivalMin
+
+    return {
+      name: i18n('Pruning'),
+      description: i18n(
+        'Maximum size of Liquid block data to keep on disk. Set to 0 to keep the entire sidechain (full archival). PeerSwap and other swap consumers only ever look back about an hour of blocks, so even the smallest prune target leaves them a wide margin.',
+      ),
+      warning: i18n(
+        'Lowering this value on an already-synced node discards blocks immediately. Raising it, or switching back to full archival, requires a full re-sync. Pruning also disables the Transaction Index.',
+      ),
+      placeholder: null,
+      required: false,
+      default: smallDisk ? minPrune : 0,
+      integer: true,
+      units: 'MiB',
+      min: smallDisk ? minPrune : 0,
+      max: Math.floor((disk.total * 0.5) / (1024 * 1024)),
+    }
+  }),
+  txindex: Value.dynamicTriState(async ({ effects }) => {
+    const disk = await diskUsage()
+    return {
+      name: i18n('Transaction Index'),
+      description: i18n(
+        'Build a complete index of every Liquid transaction, so `getrawtransaction` can look up any transaction by id alone. Not required by PeerSwap, and it adds several GB on top of an already large chain.',
+      ),
+      default: null,
+      footnote: `${i18n('Default')}: false`,
+      disabled:
+        disk.total < archivalMin ? i18n('Not enough disk space') : false,
+    }
+  }),
   dbcache: Value.number({
     name: i18n('Database Cache'),
     description: i18n(
@@ -86,7 +133,7 @@ export const fullConfigSpec = sdk.InputSpec.of({
     min: 0,
     integer: true,
     units: 'MiB',
-    footnote: `${i18n('Default')}: 450 MiB`,
+    footnote: `${i18n('Default')}: ${defaultDbcache()} MiB`,
   }),
   rpcthreads: Value.number({
     name: i18n('RPC Threads'),
@@ -124,6 +171,8 @@ function fileToForm(
 ): T.DeepPartial<typeof fullConfigSpec._TYPE> {
   return {
     raw: input ?? {},
+    prune: input.prune ?? null,
+    txindex: input.txindex ?? null,
     dbcache: input.dbcache ?? null,
     rpcthreads: input.rpcthreads ?? null,
     rpcworkqueue: input.rpcworkqueue ?? null,
@@ -134,14 +183,21 @@ function fileToForm(
 function formToFile(
   input: T.DeepPartial<typeof fullConfigSpec._TYPE>,
 ): ElementsConf {
-  const { raw, dbcache, rpcthreads, rpcworkqueue, maxconnections } = input
+  const {
+    raw,
+    prune,
+    txindex,
+    dbcache,
+    rpcthreads,
+    rpcworkqueue,
+    maxconnections,
+  } = input
   return {
     ...raw,
     // Enforced
     chain,
     server: true,
     listen: true,
-    txindex: true,
     validatepegin: false,
     rpcbind,
     rpcallowip,
@@ -150,7 +206,9 @@ function formToFile(
     // Preserve any generated RPC auth from raw.
     rpcuser: raw?.rpcuser,
     rpcpassword: raw?.rpcpassword,
-    // Tunables
+    // Tunables. elementsd refuses to start with both prune and txindex set.
+    prune: prune ?? 0,
+    txindex: prune ? false : (txindex ?? undefined),
     dbcache: dbcache ?? undefined,
     rpcthreads: rpcthreads ?? undefined,
     rpcworkqueue: rpcworkqueue ?? undefined,

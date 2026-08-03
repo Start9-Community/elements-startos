@@ -5,7 +5,7 @@ export const manifest = setupManifest({
   id: 'elements',
   title: 'Elements (Liquid)',
   license: 'MIT',
-  packageRepo: 'https://github.com/brendio/elements-startos',
+  packageRepo: 'https://github.com/Start9-Community/elements-startos',
   upstreamRepo: 'https://github.com/ElementsProject/elements',
   marketingUrl: 'https://liquid.net/',
   donationUrl: null,
@@ -23,15 +23,12 @@ export const manifest = setupManifest({
       arch: ['aarch64', 'x86_64'],
     },
   },
-  alerts: {
-    install: null,
-    update: null,
-    uninstall: null,
-    restore: null,
-    start: null,
-    stop: null,
+  hardwareRequirements: {
+    // elementsd's own working set plus the default dbcache sits near 1.5 GB
+    // during IBD; 4 GB is the floor at which it coexists with StartOS and a
+    // Lightning stack rather than driving the box into swap.
+    // StartOS compares this against the host's RAM in bytes.
+    ram: 4 * 1024 ** 3,
   },
-  // No required dependencies: this is a standalone Liquid full node
-  // (validatepegin=0). Other packages depend on THIS one.
   dependencies: {},
 })

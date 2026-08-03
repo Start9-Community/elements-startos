@@ -1,14 +1,16 @@
 import { i18n } from './i18n'
 import { sdk } from './sdk'
-import { rpcInterfaceId, rpcPort } from './utils'
+import {
+  peerHostId,
+  peerInterfaceId,
+  peerPort,
+  rpcHostId,
+  rpcInterfaceId,
+  rpcPort,
+} from './utils'
 
-/**
- * Exposes the Liquid (elementsd) JSON-RPC port so that dependent packages can
- * reach it at `elements.startos:7041`. This is an internal/LAN API interface;
- * it intentionally does NOT create a public Tor UI.
- */
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
-  const rpcMulti = sdk.MultiHost.of(effects, 'rpc')
+  const rpcMulti = sdk.MultiHost.of(effects, rpcHostId)
   const rpcMultiOrigin = await rpcMulti.bindPort(rpcPort, {
     protocol: 'http',
     preferredExternalPort: rpcPort,
@@ -29,5 +31,27 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
 
   const rpcReceipt = await rpcMultiOrigin.export([rpc])
 
-  return [rpcReceipt]
+  const peerMulti = sdk.MultiHost.of(effects, peerHostId)
+  const peerMultiOrigin = await peerMulti.bindPort(peerPort, {
+    protocol: null,
+    preferredExternalPort: peerPort,
+    addSsl: null,
+    secure: { ssl: false },
+  })
+  const peer = sdk.createInterface(effects, {
+    name: i18n('Peer Interface'),
+    id: peerInterfaceId,
+    description: i18n(
+      'Listens for incoming connections from peers on the Liquid network',
+    ),
+    type: 'p2p',
+    masked: false,
+    schemeOverride: { ssl: null, noSsl: null },
+    username: null,
+    path: '',
+    query: {},
+  })
+  const peerReceipt = await peerMultiOrigin.export([peer])
+
+  return [rpcReceipt, peerReceipt]
 })

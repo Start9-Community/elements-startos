@@ -1,3 +1,4 @@
+import * as diskusage from 'diskusage'
 import { access, rm } from 'fs/promises'
 import { elementsConfFile } from './fileModels/elements.conf'
 import { storeJson } from './fileModels/store.json'
@@ -6,6 +7,8 @@ import { sdk } from './sdk'
 import {
   cookiePath,
   defaultWallet,
+  diskCriticalBytes,
+  diskWarningBytes,
   elementsCliArgs,
   elementsMounts,
   GetBlockchainInfo,
@@ -26,7 +29,9 @@ export const main = sdk.setupMain(async ({ effects }) => {
   const elementsConf = await elementsConfFile.read().const(effects)
   if (!elementsConf) throw new Error('No elements.conf')
 
-  const elementsSub = await sdk.SubContainer.of(
+  // eager: `rootfs` is read synchronously below, which a lazy handle only
+  // exposes as a Promise
+  const elementsSub = await sdk.SubContainer.eager(
     effects,
     { imageId: 'elements' },
     elementsMounts,
@@ -34,6 +39,8 @@ export const main = sdk.setupMain(async ({ effects }) => {
   )
 
   const cookieFsPath = `${elementsSub.rootfs}${cookiePath}`
+
+  let lowDiskNotified = false
 
   // remove any stale cookie so the RPC ready-check only passes once the daemon
   // has actually re-created it for this run
@@ -158,6 +165,51 @@ export const main = sdk.setupMain(async ({ effects }) => {
           },
         },
         requires: ['elementsd'],
+      })
+      .addHealthCheck('disk-space', {
+        ready: {
+          display: i18n('Disk Space'),
+          trigger: sdk.trigger.statusTrigger(300_000, { failure: 60_000 }),
+          fn: async () => {
+            const { available } = await diskusage.check('/')
+            const free = (available / 1_000_000_000).toFixed(1)
+
+            if (available < diskCriticalBytes) {
+              return {
+                message: i18n(
+                  'Only ${free} GB free. Stop Elements and free space — elementsd can corrupt its chain data if it runs the disk out.',
+                  { free },
+                ),
+                result: 'failure',
+              }
+            }
+
+            if (available < diskWarningBytes) {
+              if (!lowDiskNotified) {
+                lowDiskNotified = true
+                await sdk.notification.create(effects, {
+                  level: 'warning',
+                  title: i18n('Low Disk Space'),
+                  message: i18n(
+                    'Elements has ${free} GB of disk left. The Liquid sidechain grows several GB a month — enable Pruning under the Configuration action to cap what it keeps.',
+                    { free },
+                  ),
+                })
+              }
+              return {
+                message: i18n('${free} GB free — running low', { free }),
+                result: 'success',
+              }
+            }
+
+            lowDiskNotified = false
+            return {
+              message: i18n('${free} GB free', { free }),
+              result: 'success',
+            }
+          },
+        },
+        requires: [],
       })
   )
 })

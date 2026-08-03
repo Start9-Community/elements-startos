@@ -1,60 +1,79 @@
 # Elements (Liquid)
 
-This package runs **Elements Core (`elementsd`) as a Liquid mainnet full
-node**. It is primarily a **backend for other services** (such as PeerSwap)
-rather than something you interact with directly — there is no web UI, only an
-internal JSON-RPC interface.
+Before you start it: this node syncs the whole Liquid sidechain, which is well
+over 80 GB and growing by tens of GB a year. Read "Managing disk use" below and
+decide on pruning before the initial sync fills your disk.
 
-## Before you start: sync time & disk
+## Documentation
 
-`elementsd` runs a full, validating **Liquid** node. On first launch it
-performs an initial block download (IBD) of the entire Liquid sidechain:
+- [Liquid developer documentation](https://docs.liquid.net/) — what Liquid is
+  and how its assets, confidential transactions, and RPC work.
+- [Elements Core repository](https://github.com/ElementsProject/elements) — the
+  daemon this package runs, and its full RPC reference.
 
-- **Disk:** plan for **a few GB and growing** (far smaller than Bitcoin
-  mainnet, which is hundreds of GB).
-- **Sync time:** Liquid has 1-minute blocks; the initial sync typically takes a
-  few hours depending on your hardware and network. The service is **not fully
-  usable until sync completes** — dependent services may show "starting" until
-  then.
+## What you get on StartOS
 
-The **Dashboard** shows live sync progress under the **Liquid Sync** health
-check, and the **Runtime & Connection Info** action shows block height and
-percentage complete.
+- A standalone **Liquid full node**. It does not need a Bitcoin node alongside
+  it: peg-in validation is off, which is the right mode for wallet and swap use.
+- A **JSON-RPC interface** that other StartOS services connect to. PeerSwap is
+  the first consumer, but any service needing Liquid can use it.
+- A **Liquid wallet named `peerswap`**, created for you on first run.
+- A **peer interface** for inbound connections from other Liquid nodes.
 
-## What you get
+There is no web interface. Elements is a backend — you will interact with it
+through the services that depend on it, and through its Actions.
 
-- A **standalone Liquid full node** (`validatepegin=0`) — no Bitcoin node
-  required alongside it.
-- A **JSON-RPC interface** reachable by other StartOS packages at
-  `elements.startos:7041`.
-- A pre-created **`peerswap` wallet** for swap consumers.
+## Getting set up
 
-## For dependent packages (e.g. PeerSwap)
+1. Start the service. It begins downloading and validating the Liquid
+   sidechain immediately.
+2. Watch the **Liquid Sync** health check for progress. Expect the initial sync
+   to run for hours, and longer on low-power hardware.
+3. Once sync completes you will get a "Sync Complete" notification. Services
+   that depend on Elements can connect before then — they only need the RPC to
+   answer — but Liquid balances and transactions are not trustworthy until the
+   node is fully synced.
 
-A dependent package should mount this package's `main` volume read-only and use:
+## Managing disk use
 
-| Field | Value |
-|---|---|
-| RPC host | `elements.startos` |
-| RPC port | `7041` |
-| RPC cookie | `<mountpoint>/liquidv1/.cookie` (e.g. `/mnt/elements/liquidv1/.cookie`) |
-| Wallet | `peerswap` |
+Run the **Configuration** action before or during the initial sync.
 
-The cookie file format is `__cookie__:<password>`; split on the first `:` to get
-the RPC username and password. Alternatively, `rpcuser`/`rpcpassword` may be set
-in `elements.conf` for explicit credentials.
+- **Pruning** caps how much block data is kept. On a small disk the package
+  already defaults to a pruned target; on a large one it defaults to keeping
+  everything. Pruning does not limit what PeerSwap or similar services can do —
+  they only ever read about an hour of recent blocks.
+- **Transaction Index** is off by default. Turn it on only if you have some
+  other tool that needs to look up arbitrary Liquid transactions by id; it costs
+  several more GB and cannot be combined with pruning.
+- **Database Cache** trades RAM for sync speed.
 
-## Actions
+Lowering the prune target on an already-synced node discards blocks straight
+away. Raising it, or going back to keeping everything, means re-syncing from
+scratch.
 
-- **Configuration** — edit performance/RPC tunables (DB cache, RPC threads,
-  work queue, max connections).
-- **Runtime & Connection Info** — live sync status and the exact RPC connection
-  details dependents use.
+The **Disk Space** health check watches free space for you. It notifies you when
+space gets low and turns red before the node runs the disk out, because
+`elementsd` can corrupt its chain data if that happens.
+
+## Using Elements
+
+### Actions
+
+- **Configuration** — pruning, transaction index, database cache, RPC threads,
+  RPC work queue, and maximum peer connections.
+- **Runtime & Connection Info** — current block height, sync progress, peer
+  count, and the RPC details a dependent service uses.
+
+### Connecting another service
+
+Install the service that needs Liquid and start it; StartOS wires the dependency
+up. **Runtime & Connection Info** shows the connection details if you need to
+configure something by hand.
 
 ## Limitations
 
-- This is a **Liquid mainnet** node only (`chain=liquidv1`). It does not run
-  Bitcoin mainnet, testnet, or Liquid testnet.
-- It runs with peg-in validation disabled (`validatepegin=0`), which is the
-  intended mode for wallet/swap use. Peg-in *validation* against the Bitcoin
-  chain is therefore not performed.
+- This is a **Liquid mainnet** node only. It cannot run Bitcoin mainnet,
+  testnet, or Liquid testnet.
+- Peg-in transactions are **not validated** against the Bitcoin chain. That is
+  the deliberate trade that lets this run without a Bitcoin node; if you need
+  validated peg-ins, this package is not the right tool.

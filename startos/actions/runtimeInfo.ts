@@ -9,6 +9,7 @@ import {
   elementsMounts,
   GetBlockchainInfo,
   GetNetworkInfo,
+  rpcHostId,
   rpcPort,
 } from '../utils'
 
@@ -29,36 +30,44 @@ export const runtimeInfo = sdk.Action.withoutInput(
   async ({ effects }) => {
     const value: T.ActionResultMember[] = []
 
+    const rpcAddress = await sdk.host
+      .getBridgeAddress(effects, { hostId: rpcHostId, internalPort: rpcPort })
+      .once()
+
     value.push({
       type: 'group',
       name: i18n('Connection (for dependents)'),
       description: null,
       value: [
-        single(i18n('RPC Host'), 'elements.startos', true),
-        single(i18n('RPC Port'), String(rpcPort), true),
+        single(
+          i18n('RPC Address'),
+          rpcAddress ?? i18n('Not yet assigned'),
+          true,
+        ),
         single(i18n('Cookie Path (in volume)'), cookiePath, true),
         single(i18n('Wallet'), defaultWallet, true),
       ],
     })
 
     try {
-      const bciRes = await sdk.SubContainer.withTemp(
+      const { bci, ni } = await sdk.SubContainer.withTemp(
         effects,
         { imageId: 'elements' },
         elementsMounts,
-        'getblockchaininfo',
-        (subc) => subc.execFail([...elementsCliArgs(), 'getblockchaininfo']),
+        'elements-runtime-info',
+        async (subc) => {
+          const call = async (method: string) =>
+            JSON.parse(
+              String(
+                (await subc.execFail([...elementsCliArgs(), method])).stdout,
+              ),
+            )
+          return {
+            bci: (await call('getblockchaininfo')) as GetBlockchainInfo,
+            ni: (await call('getnetworkinfo')) as GetNetworkInfo,
+          }
+        },
       )
-      const bci: GetBlockchainInfo = JSON.parse(bciRes.stdout as string)
-
-      const niRes = await sdk.SubContainer.withTemp(
-        effects,
-        { imageId: 'elements' },
-        elementsMounts,
-        'getnetworkinfo',
-        (subc) => subc.execFail([...elementsCliArgs(), 'getnetworkinfo']),
-      )
-      const ni: GetNetworkInfo = JSON.parse(niRes.stdout as string)
 
       value.push({
         type: 'group',
@@ -79,7 +88,7 @@ export const runtimeInfo = sdk.Action.withoutInput(
           single(i18n('Version'), ni.subversion || String(ni.version), false),
         ],
       })
-    } catch (e) {
+    } catch {
       value.push(
         single(
           i18n('Liquid Node'),
