@@ -103,7 +103,9 @@ Three package decisions follow from that:
    service start while space is merely low.
 
 `hardwareRequirements.ram` gates installation on hosts with too little memory to
-run the daemon alongside StartOS itself.
+run the daemon alongside StartOS itself. StartOS compares it against host RAM
+**in bytes**, so the 4 GB floor is written `4 * 1024 ** 3` — a plain `4096` would
+declare 4 KiB and gate nothing.
 
 ---
 
