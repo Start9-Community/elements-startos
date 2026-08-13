@@ -1,6 +1,5 @@
 import { utils } from '@start9labs/start-sdk'
 import * as diskusage from 'diskusage'
-import { totalmem } from 'os'
 import { sdk } from './sdk'
 
 /**
@@ -58,9 +57,6 @@ export const minPrune = 550
 /** Free space below which the node is at real risk of wedging mid-sync. */
 export const diskCriticalBytes = 5_000_000_000
 export const diskWarningBytes = 20_000_000_000
-
-export const defaultDbcache = () =>
-  Math.min(Math.floor((totalmem() * 0.15) / (1024 * 1024)), 2_048)
 
 export const elementsMounts = sdk.Mounts.of().mountVolume({
   volumeId: 'main',

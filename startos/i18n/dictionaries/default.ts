@@ -67,6 +67,7 @@ const dict = {
   // actions/runtimeInfo.ts
   'RPC Address': 51,
   'Not yet assigned': 52,
+  'Leave blank to use the Elements default.': 53,
 } as const
 
 /**
