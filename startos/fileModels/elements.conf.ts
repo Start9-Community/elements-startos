@@ -4,7 +4,6 @@ import { sdk } from '../sdk'
 import {
   archivalMin,
   chain,
-  defaultDbcache,
   defaultWallet,
   diskUsage,
   minPrune,
@@ -133,7 +132,7 @@ export const fullConfigSpec = sdk.InputSpec.of({
     min: 0,
     integer: true,
     units: 'MiB',
-    footnote: `${i18n('Default')}: ${defaultDbcache()} MiB`,
+    footnote: i18n('Leave blank to use the Elements default.'),
   }),
   rpcthreads: Value.number({
     name: i18n('RPC Threads'),

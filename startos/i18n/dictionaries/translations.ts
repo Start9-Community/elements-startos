@@ -53,6 +53,7 @@ export default {
     50: 'Escucha conexiones entrantes de pares de la red Liquid',
     51: 'Dirección RPC',
     52: 'Aún no asignada',
+    53: 'Deje en blanco para usar el valor predeterminado de Elements.',
   },
   de_DE: {
     0: 'Die Liquid-RPC-Schnittstelle ist bereit',
@@ -106,6 +107,7 @@ export default {
     50: 'Nimmt eingehende Verbindungen von Peers im Liquid-Netzwerk entgegen',
     51: 'RPC-Adresse',
     52: 'Noch nicht zugewiesen',
+    53: 'Leer lassen, um den Standardwert von Elements zu verwenden.',
   },
   pl_PL: {
     0: 'Interfejs RPC Liquid jest gotowy',
@@ -159,6 +161,7 @@ export default {
     50: 'Nasłuchuje połączeń przychodzących od węzłów sieci Liquid',
     51: 'Adres RPC',
     52: 'Jeszcze nieprzypisany',
+    53: 'Pozostaw puste, aby użyć domyślnej wartości Elements.',
   },
   fr_FR: {
     0: "L'interface RPC Liquid est prête",
@@ -212,5 +215,6 @@ export default {
     50: 'Écoute les connexions entrantes des pairs du réseau Liquid',
     51: 'Adresse RPC',
     52: 'Pas encore attribuée',
+    53: "Laissez vide pour utiliser la valeur par défaut d'Elements.",
   },
 } satisfies Record<string, LangDict>

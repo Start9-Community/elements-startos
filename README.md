@@ -103,9 +103,13 @@ Three package decisions follow from that:
    service start while space is merely low.
 
 `hardwareRequirements.ram` gates installation on hosts with too little memory to
-run the daemon alongside StartOS itself. StartOS compares it against host RAM
-**in bytes**, so the 4 GB floor is written `4 * 1024 ** 3` — a plain `4096` would
-declare 4 KiB and gate nothing.
+run the daemon alongside StartOS itself. Two things about the units: StartOS
+compares it **in bytes**, so a plain `4096` would declare 4 KiB and gate
+nothing; and it compares against the host's `MemTotal`, which sits a few hundred
+MiB below the capacity a machine is sold with. A "4 GB minimum" is therefore
+declared as `3 * 1024 ** 3` — between the 2 and 4 GB sizes — because a literal
+`4 * 1024 ** 3` rejects every 4 GB machine, which is exactly the class it is
+meant to admit.
 
 ---
 

@@ -26,9 +26,11 @@ export const manifest = setupManifest({
   hardwareRequirements: {
     // elementsd's own working set plus the default dbcache sits near 1.5 GB
     // during IBD; 4 GB is the floor at which it coexists with StartOS and a
-    // Lightning stack rather than driving the box into swap.
-    // StartOS compares this against the host's RAM in bytes.
-    ram: 4 * 1024 ** 3,
+    // Lightning stack rather than driving the box into swap. StartOS compares
+    // this against MemTotal, which is a few hundred MiB under the advertised
+    // capacity, so a literal 4 GiB rejects every 4 GB machine. 3 GiB sits
+    // between the 2 and 4 GB tiers.
+    ram: 3 * 1024 ** 3,
   },
   dependencies: {},
 })
