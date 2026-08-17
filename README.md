@@ -1,23 +1,18 @@
 <p align="center">
-  <img src="icon.svg" alt="Elements (Liquid) Logo" width="21%">
+  <img src="icon.png" alt="Elements Logo" width="21%">
 </p>
 
 # Elements (Liquid) on StartOS
 
-> **Upstream docs:** <https://docs.liquid.net/>
->
 > Everything not listed in this document should behave the same as upstream
-> Elements Core. If a feature, setting, or behavior is not mentioned here, the
-> upstream documentation is accurate and fully applicable.
+> Elements. If a feature, setting, or behavior is not mentioned here, the
+> upstream documentation is accurate and fully applicable — see the
+> Documentation section of `instructions.md` for links.
 
-Elements Core (`elementsd`) packaged for StartOS as a Liquid mainnet
-(`liquidv1`) full node. It exposes a JSON-RPC interface and a wallet so that
-other StartOS services — primarily PeerSwap — can use Liquid (L-BTC)
-functionality. Upstream repository:
-<https://github.com/ElementsProject/elements>.
+[Elements](https://github.com/ElementsProject/elements) is the node software behind the Liquid sidechain. This package runs a Liquid mainnet node for other services to depend on — PeerSwap above all — pre-creates the wallet they expect, and manages the one thing that actually costs anything here: disk.
 
-This README documents the package architecture for developers and LLMs. End-user
-docs are in [`instructions.md`](instructions.md).
+- **Upstream repo:** <https://github.com/ElementsProject/elements>
+- **Wrapper repo:** <https://github.com/Start9-Community/elements-startos>
 
 ---
 
@@ -25,291 +20,196 @@ docs are in [`instructions.md`](instructions.md).
 
 - [Image and Container Runtime](#image-and-container-runtime)
 - [Volume and Data Layout](#volume-and-data-layout)
-- [Disk Footprint](#disk-footprint)
-- [The Dependency Contract](#the-dependency-contract)
-- [Installation and First-Run Flow](#installation-and-first-run-flow)
-- [Configuration Management](#configuration-management)
-- [Network Access and Interfaces](#network-access-and-interfaces)
-- [Actions (StartOS UI)](#actions-startos-ui)
-- [Backups and Restore](#backups-and-restore)
-- [Health Checks](#health-checks)
+- [File Models](#file-models)
 - [Dependencies](#dependencies)
+- [Network Access and Interfaces](#network-access-and-interfaces)
+- [Installation and First-Run Flow](#installation-and-first-run-flow)
+- [Actions](#actions)
+- [Tasks](#tasks)
+- [Health Checks](#health-checks)
+- [Backups and Restore](#backups-and-restore)
 - [Limitations and Differences](#limitations-and-differences)
-- [What Is Unchanged from Upstream](#what-is-unchanged-from-upstream)
-- [Contributing](#contributing)
 - [Quick Reference for AI Consumers](#quick-reference-for-ai-consumers)
 
 ---
 
 ## Image and Container Runtime
 
-| Property      | Value                                                                                                                  |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Image         | custom `Dockerfile` — downloads the official Elements release tarball and verifies it against the release `SHA256SUMS` |
-| Architectures | x86_64, aarch64                                                                                                        |
-| Entrypoint    | none; StartOS invokes `elementsd -datadir=/root/.elements` directly                                                    |
-| CLI           | `elements-cli`, used by the health checks and the runtime-info action                                                  |
+One image, built here from a pinned upstream version.
 
-The upstream version is pinned by the `VERSION` build arg in
-`startos/manifest/index.ts`. See [`UPDATING.md`](UPDATING.md) for the bump
-procedure.
+| Property      | Value                                |
+| ------------- | ------------------------------------ |
+| Image         | Built from this repo's `Dockerfile`  |
+| Architectures | x86_64, aarch64                      |
+| Memory        | Requires a machine of 4 GB or better |
 
----
+| Subcontainer   | Purpose                                                    |
+| -------------- | ---------------------------------------------------------- |
+| `elements-sub` | The daemon and the wallet oneshot — the one to `attach` to |
+
+The memory floor is where `elementsd`'s working set plus its cache coexists with StartOS and a Lightning stack rather than driving the box into swap. The declared value is deliberately set below the round number, because StartOS compares it against reported memory, which reads a few hundred MiB under the advertised capacity — a literal 4 GiB would reject every 4 GB machine.
 
 ## Volume and Data Layout
 
-| Volume | Mount Point       | Purpose                            |
-| ------ | ----------------- | ---------------------------------- |
-| `main` | `/root/.elements` | Config, chain data, wallet, cookie |
+One volume, mounted as the node's data directory.
 
-On the `main` volume:
+| Volume | Mount Point       | Purpose                                          |
+| ------ | ----------------- | ------------------------------------------------ |
+| `main` | `/root/.elements` | The chain, the config, the wallet, and the store |
 
-```
-/root/.elements/elements.conf
-/root/.elements/store.json          # StartOS-managed: sync + wallet flags
-/root/.elements/liquidv1/.cookie
-/root/.elements/liquidv1/blocks/
-/root/.elements/liquidv1/chainstate/
-/root/.elements/liquidv1/wallets/peerswap/
-```
+| Path                            | Holds                                    |
+| ------------------------------- | ---------------------------------------- |
+| `elements.conf`                 | The node configuration                   |
+| `liquidv1/blocks`, `chainstate` | The sidechain itself                     |
+| `liquidv1/.cookie`              | The RPC credential, regenerated each run |
+| `liquidv1/wallets/peerswap/`    | The pre-created wallet                   |
+| `store.json`                    | Package state                            |
 
----
+**Disk is the dominant operational cost of this package**, and the reason several of its defaults differ from a naive Elements install. Liquid produces a block a minute and has been running for years, so the chain is well past 80 GB and growing — with recent blocks an order of magnitude larger than mid-history ones. Plan on tens of GB a year, accelerating.
 
-## Disk Footprint
+Three decisions follow from that, and they are covered under [File Models](#file-models) and [Health Checks](#health-checks): the transaction index is off, pruning is offered and defaults on for small disks, and a disk check runs alongside the daemon.
 
-This is the dominant operational cost of the package, and the reason several of
-its defaults differ from a naive Elements install.
+## File Models
 
-Liquid produces a block every minute and has been running since 2018, so the
-sidechain is well past **80 GB** of raw block data — and the growth rate is
-climbing steeply, with recent blocks an order of magnitude larger than
-mid-history ones. Treat "tens of GB per year, accelerating" as the planning
-figure rather than any number written here.
+Two models. The config's fields fall into three groups, and which group a key is in decides whether an edit survives.
 
-Three package decisions follow from that:
+| File            | Format | Modelled                | Written by                        |
+| --------------- | ------ | ----------------------- | --------------------------------- |
+| `elements.conf` | INI    | Yes — `FileHelper.ini`  | Init and the Configuration action |
+| `store.json`    | JSON   | Yes — `FileHelper.json` | `main`                            |
 
-1. **`txindex` defaults off** (upstream's own default). It is not required by
-   PeerSwap — PeerSwap resolves swap transactions with
-   `getrawtransaction <txid> <verbose> <blockhash>` over a bounded block range,
-   which needs no index — and it adds several GB to an already large chain.
-2. **Pruning is exposed** through the Configuration action, and defaults to a
-   pruned target on hosts whose disk is too small for an archival node. A
-   pruned node still serves every swap consumer: PeerSwap's Liquid CSV window
-   is 60 blocks (one hour), so even the smallest legal prune target retains
-   orders of magnitude more history than it reads.
-3. **A `Disk Space` health check** runs alongside the daemon. It fails the
-   service when free space drops to a few GB — the point at which `elementsd`
-   risks corrupting its chainstate — and raises a StartOS notification once per
-   service start while space is merely low.
+- **Enforced.** The chain, server and listen flags, the peg-in validation setting, and the whole RPC binding are `z.literal(...).catch(...)` — a changed value is **repaired on read**, not merely overwritten. They pin the node to Liquid mainnet and keep it reachable from the internal network.
+- **Optional credentials.** An RPC username and password may be set, letting a dependent authenticate without reading the cookie. The cookie remains the primary credential and is always present.
+- **User-tunable.** Pruning, the transaction index, the database cache, RPC threads and work queue, connection limit, and the fallback fee.
 
-`hardwareRequirements.ram` gates installation on hosts with too little memory to
-run the daemon alongside StartOS itself. Two things about the units: StartOS
-compares it **in bytes**, so a plain `4096` would declare 4 KiB and gate
-nothing; and it compares against the host's `MemTotal`, which sits a few hundred
-MiB below the capacity a machine is sold with. A "4 GB minimum" is therefore
-declared as `3 * 1024 ** 3` — between the 2 and 4 GB sizes — because a literal
-`4 * 1024 ** 3` rejects every 4 GB machine, which is exactly the class it is
-meant to admit.
+INI values read back as strings, and duplicate keys as arrays; the model coerces both.
 
----
+**Two of the tunables are sized against the actual disk**, not offered blindly:
 
-## The Dependency Contract
+- **Pruning** defaults to a pruned target on hosts too small for an archival node, and to full archival otherwise. Its maximum is half the disk. A value between zero and upstream's floor is silently raised to that floor rather than rejected. **Lowering it on a synced node discards blocks immediately; raising it, or going back to archival, requires a full re-sync** — and pruning disables the transaction index.
+- **The transaction index** is off by default, matching upstream, and is **disabled outright on a disk too small for it**. It is not required by PeerSwap, which resolves swap transactions over a bounded block range, and it adds several GB to an already large chain.
 
-A dependent (e.g. `peerswap`) mounts this package's `main` volume **read-only**
-for credentials, and resolves the RPC address over the LXC bridge with
-`sdk.host.getBridgeAddress`:
-
-| Field         | Value                                                                   |
-| ------------- | ----------------------------------------------------------------------- |
-| Host id       | `rpc` (exported as `rpcHostId` from `startos/utils.ts`)                 |
-| Internal port | `7041` (exported as `rpcPort`)                                          |
-| Cookie file   | `<mountpoint>/liquidv1/.cookie` (e.g. `/mnt/elements/liquidv1/.cookie`) |
-| Cookie format | `__cookie__:<password>` — split on the first `:`                        |
-| Wallet        | `peerswap`, pre-created on first run                                    |
-| Health check  | `elementsd` — RPC readiness, not full sync                              |
-
-Do **not** hardcode `elements.startos:7041`: that DNS form is retired, and the
-address a dependent reaches this node at is a property of how the binding was
-made. Import `rpcHostId` / `rpcPort` and let the SDK resolve it.
-
-The cookie is the primary credential surface — always present, regenerated each
-run. `rpcuser` / `rpcpassword` may optionally be set in `elements.conf` for
-fixed credentials instead.
-
----
-
-## Installation and First-Run Flow
-
-There is no upstream setup wizard to skip and no credential to hand the user;
-the node is a backend.
-
-1. `seedFiles` writes `elements.conf` (enforced keys plus defaults) and
-   `store.json`.
-2. `main.ts` removes any stale RPC cookie, then starts `elementsd`, which begins
-   initial block download of the Liquid sidechain.
-3. Once RPC is reachable, the `create-wallet` oneshot loads or creates the
-   `peerswap` wallet with `load_on_startup=true`, so the wallet is pinned in
-   `settings.json` and reloads with the daemon even if a later start races IBD.
-4. The `Liquid Sync` health check tracks IBD and fires a one-time "Sync
-   Complete" notification when it finishes.
-
----
-
-## Configuration Management
-
-`elements.conf` is managed by the `elementsConfFile` FileHelper
-(`startos/fileModels/elements.conf.ts`). Unknown keys already in the file are
-preserved.
-
-| StartOS-Managed (enforced)                                                                        | User-Managed (Configuration action)                                           |
-| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `chain`, `server`, `listen`, `validatepegin`, `rpcbind`, `rpcallowip`, `rpcport`, `rpccookiefile` | `prune`, `txindex`, `dbcache`, `rpcthreads`, `rpcworkqueue`, `maxconnections` |
-
-Enforced keys keep the node reachable from the StartOS internal network and pin
-it to the Liquid mainnet sidechain. `prune` and `txindex` are mutually exclusive
-in Elements; setting a prune target forces `txindex` off on write.
-
----
-
-## Network Access and Interfaces
-
-| Interface      | Host id | Port | Type  | Purpose                                         |
-| -------------- | ------- | ---- | ----- | ----------------------------------------------- |
-| RPC Interface  | `rpc`   | 7041 | `api` | Liquid JSON-RPC, consumed by dependent services |
-| Peer Interface | `peer`  | 7042 | `p2p` | Inbound connections from Liquid network peers   |
-
-Both are ordinary StartOS interfaces: the **user** decides where each is
-reachable. There is no web UI — this package is a backend, not a user-facing
-app.
-
----
-
-## Actions (StartOS UI)
-
-| Action                        | Id             | Visibility | Availability | Inputs                                                                        | Outputs                                                                |
-| ----------------------------- | -------------- | ---------- | ------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| **Configuration**             | `config`       | enabled    | any status   | `prune`, `txindex`, `dbcache`, `rpcthreads`, `rpcworkqueue`, `maxconnections` | writes `elements.conf`                                                 |
-| **Runtime & Connection Info** | `runtime-info` | enabled    | only running | none                                                                          | sync status, peer count, and the RPC connection details dependents use |
-
-`prune` and `txindex` are dynamic values: their bounds and availability are
-computed from the host's disk size, so an archival node cannot be selected on a
-disk that cannot hold one.
-
----
-
-## Backups and Restore
-
-**Included:** the `main` volume — `elements.conf`, `store.json`, and the Liquid
-wallet under `liquidv1/wallets/`.
-
-**Excluded (re-syncable or runtime-only):** `liquidv1/blocks/`,
-`liquidv1/chainstate/`, `liquidv1/indexes/`, `liquidv1/.cookie`, lock and pid
-files, and SQLite journals.
-
-A restore therefore returns the wallet immediately and re-syncs the chain from
-scratch.
-
----
-
-## Health Checks
-
-| Check       | Id              | Method                                          | Notes                                                          |
-| ----------- | --------------- | ----------------------------------------------- | -------------------------------------------------------------- |
-| RPC         | `elementsd`     | cookie file exists, then port 7041 is listening | The daemon's `ready`; this is what dependents gate on          |
-| Liquid Sync | `sync-progress` | `getblockchaininfo` via `elements-cli`          | `loading` with a percentage during IBD, `success` once synced  |
-| Disk Space  | `disk-space`    | free space on the data filesystem               | `failure` below a few GB; notification once per start when low |
-
-`elementsd` carries a 120 s `sigtermTimeout` so the daemon can flush chainstate
-on shutdown.
-
----
+`store.json` holds two flags used to avoid repeating themselves: whether the node has ever finished syncing, and whether the wallet has been created.
 
 ## Dependencies
 
-**None.** This is a standalone Liquid full node (`validatepegin=0`) — other
-packages depend on it.
+None. This is a standalone Liquid node — other packages depend on **it**.
 
----
+**What a dependent needs to know:** mount this package's `main` volume read-only for the cookie, and resolve the RPC address over the internal bridge using the host id and internal port this package exports from its source. Do not hardcode a `.startos` DNS name; that form is retired, and the address a dependent reaches is a property of how the binding was made.
+
+The cookie sits at `liquidv1/.cookie` inside the mount, in `__cookie__:<password>` form — split on the first colon. The `peerswap` wallet is pre-created on first run. The dependency health check to require is the daemon's RPC readiness, **not** full sync: a dependent that waits for a fully-synced Liquid node waits days.
+
+## Network Access and Interfaces
+
+Two interfaces.
+
+| Interface      | Id     | Type | Port | Description                                  |
+| -------------- | ------ | ---- | ---- | -------------------------------------------- |
+| RPC Interface  | `rpc`  | api  | 7041 | JSON-RPC, for dependent services             |
+| Peer Interface | `peer` | p2p  | 7042 | Incoming connections from the Liquid network |
+
+The RPC binds over HTTP; the peer interface is raw TCP with no TLS, as the network protocol requires. Both request their standard ports as the external one.
+
+The RPC is bound to all interfaces inside the container and allows any source — reachability is StartOS's decision at the network layer, not the daemon's, and binding it narrowly would only stop the OS reaching it.
+
+## Installation and First-Run Flow
+
+Install writes the enforced configuration and the defaults into `elements.conf`. That merge runs on **every** lifecycle event, not just install, so the enforced keys are re-asserted after an update or a restore.
+
+Then the node starts and begins syncing, which is the long part — days, not hours, and the chain is large enough that disk should be checked before starting rather than after.
+
+Once RPC is answering, a oneshot ensures the `peerswap` wallet exists: it tries to load it, creates it if that fails, and pins it to load with the daemon either way. **The pinning matters** — the oneshot can race a slow start during initial sync, where loading a wallet can time out, and without the pin the wallet would silently stay unloaded.
+
+A notification is sent when sync first completes, so the wait does not have to be watched.
+
+## Actions
+
+Two actions.
+
+### Configuration — Configuration group
+
+Sets pruning, the transaction index, and the performance tunables.
+
+- **What it changes:** the user-tunable keys in `elements.conf`.
+- **Cost:** applies on restart.
+- **Repeat safety:** idempotent — but two of the settings are not reversible in effect. **Lowering the prune target discards blocks the moment the node restarts**, and raising it back, or returning to archival, means re-syncing the whole chain. The action's own warning says so.
+- **The form adapts to the disk it is running on**, disabling the transaction index and floor-ing pruning where there is not room.
+
+### Runtime & Connection Info
+
+Reports the node's version, connection count, sync state, wallet, and the connection details a dependent needs.
+
+- **When to run it:** only while the service is running.
+- **What it changes:** nothing.
+- **Repeat safety:** read-only.
+- **Use it to answer "what does my dependent need"** rather than reading files off the volume.
+
+## Tasks
+
+None. This package raises no tasks, so the service is never held on a prompt and its ordinary controls are always available.
+
+## Health Checks
+
+Three checks.
+
+| Check           | Displayed as  | Method                         | Cadence                        |
+| --------------- | ------------- | ------------------------------ | ------------------------------ |
+| `elementsd`     | "RPC"         | The RPC is answering           | default                        |
+| `sync-progress` | "Liquid Sync" | Verification progress from RPC | every 30s                      |
+| `disk-space`    | "Disk Space"  | Free space on the volume       | every 5 min, every 60s failing |
+
+**"RPC" is the check dependents should gate on**, and it goes green long before the node is synced. That is intended: a dependent that waits for full sync waits days, and most of them only read recent blocks.
+
+**"Disk Space" fails the service outright below a few GB free**, and that is the point of it: `elementsd` can corrupt its chain data if it runs the disk out, so failing loudly beats letting it continue. Between that and a wider threshold it stays green but warns, and raises a notification **once** rather than on every poll — the flag resets when free space recovers.
+
+Its slow cadence is deliberate: free space does not change quickly, and a five-minute poll costs nothing. It tightens to a minute once failing.
+
+## Backups and Restore
+
+The `main` volume is copied **except the chain**: blocks, chainstate, indexes, the cookie, the lock and PID files, and database journals are all excluded.
+
+**The wallet is preserved.** That is the whole point of the exclusion list being written the way it is — the chain is tens of gigabytes and fully re-syncable, while `liquidv1/wallets/` is small and is not recoverable from anywhere else.
+
+So a backup is the configuration and the wallet, and **a restored instance re-syncs from scratch** — days on Liquid. Anything depending on this node is unusable until it catches up. The cookie is excluded because it is regenerated on every run; restoring a stale one would be worse than useless.
 
 ## Limitations and Differences
 
-1. **Liquid mainnet only** (`chain=liquidv1`). Bitcoin mainnet, testnet, and
-   Liquid testnet are not selectable.
-2. **No peg-in validation** (`validatepegin=0`). Upstream defaults this on,
-   which requires a full Bitcoin node alongside Elements; this package turns it
-   off, which is the correct mode for wallet and swap use and removes the
-   Bitcoin-node requirement. Peg-in transactions are therefore not validated
-   against the Bitcoin chain.
-3. **No web UI.** The package is a backend for other services.
-4. **A wallet named `peerswap` is created on first run** whether or not PeerSwap
-   is installed.
-5. **`prune` and `txindex` cannot both be set.** Choosing a prune target clears
-   `txindex`.
-
----
-
-## What Is Unchanged from Upstream
-
-- The `elementsd` and `elements-cli` binaries are the official release builds,
-  unmodified.
-- The full JSON-RPC surface, including the wallet RPCs, behaves exactly as
-  upstream documents.
-- Chain validation, peer-to-peer behavior, mempool policy, and the on-disk data
-  format are stock.
-- Any `elements.conf` key not listed under Configuration Management above is
-  passed through untouched.
-
----
-
-## Contributing
-
-See [`AGENTS.md`](AGENTS.md).
+1. **The chain is not backed up**, by design. A restore means a full re-sync.
+2. **Liquid mainnet only.** The chain is pinned in the configuration and repaired if changed.
+3. **Peg-in validation is off**, which is what lets the node run without a Bitcoin node beside it.
+4. **Pruning is effectively one-way.** Lowering it discards blocks immediately; undoing it requires a re-sync.
+5. **The transaction index is off by default**, and unavailable on small disks.
+6. **The RPC binds to all interfaces and allows any source** inside the container; reachability is StartOS's decision.
+7. **Disk is the real constraint** — tens of GB a year, accelerating — and the service will fail its own health check rather than risk corruption when space runs out.
 
 ---
 
 ## Quick Reference for AI Consumers
 
 ```yaml
-package_id: elements
-title: Elements (Liquid)
-architectures: [x86_64, aarch64]
-chain: liquidv1
+package_id: elements # note: the title is "Elements (Liquid)"
+image: built from ./Dockerfile # upstream version pinned as a build arg
+architectures:
+  - x86_64
+  - aarch64
+subcontainers:
+  - elements-sub
 volumes:
-  main: /root/.elements
-ports:
-  rpc: 7041
-  peer: 7042
+  main: /root/.elements # chain under liquidv1/
+file_models:
+  - elements.conf
+  - store.json
+startos_managed_env_vars: [] # configuration is written into elements.conf
+dependencies: []
 interfaces:
-  rpc:
-    host_id: rpc
-    type: api
-    port: 7041
-  peer:
-    host_id: peer
-    type: p2p
-    port: 7042
-dependency_contract:
-  resolve_address_with: sdk.host.getBridgeAddress
-  host_id: rpc
-  internal_port: 7041
-  cookie_file: <mountpoint>/liquidv1/.cookie
-  cookie_format: '__cookie__:<password>'
-  wallet: peerswap
-  health_check: elementsd
-enforced_conf:
-  chain: liquidv1
-  server: 1
-  listen: 1
-  validatepegin: 0
-  rpcbind: 0.0.0.0
-  rpcallowip: 0.0.0.0/0
-  rpcport: 7041
-  rpccookiefile: .cookie
-user_conf: [prune, txindex, dbcache, rpcthreads, rpcworkqueue, maxconnections]
-health_checks: [elementsd, sync-progress, disk-space]
+  rpc: { type: api, port: 7041 }
+  peer: { type: p2p, port: 7042 }
 actions:
   - config
-  - runtime-info
-dependencies: none
-startos_managed_env_vars: []
+  - runtime-info # only-running
+tasks: []
+health_checks:
+  - elementsd # displayed "RPC"; gate dependents on this, not on sync
+  - sync-progress # displayed "Liquid Sync"
+  - disk-space # displayed "Disk Space"; fails the service when nearly full
 ```

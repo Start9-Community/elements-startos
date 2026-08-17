@@ -6,28 +6,13 @@ Develop it inside a StartOS packaging workspace created by `start-cli s9pk init-
 which provides the packaging guide and agent context one level up. If you're reading this in a
 bare clone with no workspace, the full guide is at <https://docs.start9.com/packaging>.
 
-**Start every task at the recipe index** — `../start-technologies/projects/start-sdk/docs/src/recipes.md`
-(or <https://docs.start9.com/packaging/recipes.html>). It maps an intent ("prompt the user to create
-admin credentials", "expose a web UI") to the constructs, the reference pages, and a named production
-package to copy. Find the recipe before you read this package's neighbours: a package you reach by
-grepping may be non-conformant, and the recipe outranks it.
-
-Work this package's `TODO.md` from top to bottom. Keep `README.md` (architecture, for developers and LLMs) and `instructions.md` (end-user docs) in sync with your changes.
-
-## Inspecting a running install
-
-To run a command inside a service's container (read its generated config, grep app logs), use `start-cli package attach <id> -n <subcontainer-name> -- <cmd>`. Select the subcontainer by **name** with `-n` (the name passed to `SubContainer.of` in `main.ts`, e.g. `-n web`) or by image with `-i`. Note: `-s/--subcontainer` matches the internal **Guid**, not the name, so passing a name to `-s` fails with "no matching subcontainers". A service with more than one subcontainer requires a selector; with none given, `attach` falls back to an interactive picker that panics in a non-TTY shell — that's the missing selector, not a TTY requirement.
+Work this package's `TODO.md` from top to bottom. Keep `README.md` (technical reference for an AI support or administering agent) and `instructions.md` (end-user docs) in sync with your changes.
 
 ## This repo
 
-- **Package id is `elements`.** Elements Core (`elementsd`) as a Liquid mainnet
-  (`liquidv1`) full node — a backend for other services, with no web UI. The
-  daemon subcontainer is `elements-sub`.
-- **The Liquid chain is the dominant constraint.** It is past 80 GB and growing
-  tens of GB a year, which is why `txindex` defaults off, `prune` is exposed and
-  disk-aware, and a `disk-space` health check exists. Read README § Disk
-  Footprint before changing any of those defaults.
-- **Other packages depend on this one.** `rpcHostId` / `rpcPort` and the cookie
-  path are a contract, documented in README § The Dependency Contract — changing
-  them breaks `peerswap`. Note `prune` and `txindex` are mutually exclusive in
-  Elements; `formToFile` enforces that on write.
+- **`rpcHostId` / `rpcPort` and the cookie path are a cross-package contract.** `peerswap` and anything else consuming this node resolve it from those exports; changing either breaks them silently. The contract is written out in `README.md` § Dependencies.
+- **The disk-aware defaults are not decoration.** The Liquid chain is past 80 GB and growing tens of GB a year, which is why `txindex` defaults off, `prune` is disk-sized and floors at upstream's minimum, and the `disk-space` check fails the service outright below a few GB — elementsd can corrupt chain data if it runs the disk out.
+- **`hardwareRequirements.ram` is 3 GiB to mean "4 GB or better".** StartOS compares it against `MemTotal`, which reads a few hundred MiB below the advertised capacity, so a literal 4 GiB rejects every 4 GB machine. Don't "correct" it.
+- **The `create-wallet` oneshot must keep passing `load_on_startup=true` on both paths.** It can race a slow start — `loadwallet` times out during IBD — and the pin in elementsd's own settings is what makes the wallet load with the daemon anyway rather than staying silently unloaded.
+- **The backup exclusion list is written to keep the wallet.** `liquidv1/wallets/` is small and unrecoverable; blocks, chainstate and indexes are tens of GB and re-syncable. The cookie is excluded because it is regenerated each run and a stale one is worse than none.
+- **The low-disk notification is once-per-episode, via a closure flag that resets on recovery.** Don't turn it into a per-poll notification.
