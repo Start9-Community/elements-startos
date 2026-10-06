@@ -40,8 +40,8 @@ Run the **Configuration** action before or during the initial sync.
 
 - **Pruning** caps how much block data is kept. On a small disk the package
   already defaults to a pruned target; on a large one it defaults to keeping
-  everything. Pruning does not limit what PeerSwap or similar services can do —
-  they only ever read about an hour of recent blocks.
+  everything. Pruning does not limit what PeerSwap can do — it only ever reads
+  about an hour of recent blocks.
 - **Transaction Index** is off by default. Turn it on only if you have some
   other tool that needs to look up arbitrary Liquid transactions by id; it costs
   several more GB and cannot be combined with pruning.

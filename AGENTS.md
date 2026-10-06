@@ -18,17 +18,23 @@ Freshly scaffolded? Work the
 guide page, not a file in this repo — read it, don't copy it in.
 
 Keep `README.md` (technical reference for an AI support or administering agent) and
-`instructions.md` (end-user docs) in sync with your changes.
+`instructions.md` (end-user docs) in sync with your changes. This file restates neither:
+whoever changes the package has both, so it carries only what they don't — repo mechanics,
+a change that looks right and is not, where the next thing gets added, a naming trap, a
+build or test invocation particular to this repo.
 
-**Bugs and feature requests are GitHub issues on this repo** — file them as you find them.
+**Fix a defect you spot rather than reporting it** — you have the package open and the
+context to be sure. File **a GitHub issue on this repo** only when the call isn't yours to
+make: you can't pin the cause down, two defensible fixes exist, or it's too large to ride on
+the work in hand. An open issue is a report, not a queue — implement one when you're asked
+to or when it's labelled `Approved`, then close it with `Closes #<n>`.
+
 Don't record work in the repo instead: no `TODO.md`, no `NOTES.md`, no `PLAN.md`. What you
 verified, tried, and decided belongs in the commit message and the PR body.
 
 ## This repo
 
-- **`rpcHostId` / `rpcPort` and the cookie path are a cross-package contract.** `peerswap` and anything else consuming this node resolve it from those exports; changing either breaks them silently. The contract is written out in `README.md` § Dependencies.
-- **The disk-aware defaults are not decoration.** The Liquid chain is past 80 GB and growing tens of GB a year, which is why `txindex` defaults off, `prune` is disk-sized and floors at upstream's minimum, and the `disk-space` check fails the service outright below a few GB — elementsd can corrupt chain data if it runs the disk out.
-- **`hardwareRequirements.ram` is 3 GiB to mean "4 GB or better".** StartOS compares it against `MemTotal`, which reads a few hundred MiB below the advertised capacity, so a literal 4 GiB rejects every 4 GB machine. Don't "correct" it.
-- **The `create-wallet` oneshot must keep passing `load_on_startup=true` on both paths.** It can race a slow start — `loadwallet` times out during IBD — and the pin in elementsd's own settings is what makes the wallet load with the daemon anyway rather than staying silently unloaded.
-- **The backup exclusion list is written to keep the wallet.** `liquidv1/wallets/` is small and unrecoverable; blocks, chainstate and indexes are tens of GB and re-syncable. The cookie is excluded because it is regenerated each run and a stale one is worse than none.
-- **The low-disk notification is once-per-episode, via a closure flag that resets on recovery.** Don't turn it into a per-poll notification.
+- **Don't change `rpcHostId`, `rpcPort` or the cookie path.** Dependents such as `peerswap` resolve this node from those exports and break silently.
+- **Don't round `hardwareRequirements.ram` up to 4 GiB.** StartOS compares it against `MemTotal`, which reads a few hundred MiB below the advertised capacity, so a literal 4 GiB rejects every 4 GB machine.
+- **Keep `load_on_startup=true` on both paths of the `create-wallet` oneshot.** It can race a slow start where `loadwallet` times out, and the pin is what loads the wallet with the daemon anyway.
+- **Never exclude `liquidv1/wallets/` from the backup.** The wallet is small and unrecoverable; only the re-syncable chain data is excluded.

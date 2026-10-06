@@ -20,11 +20,11 @@ const dict = {
   'Database Cache': 11,
   'How much RAM (in MiB) to allocate for caching during sync. Higher values speed up initial sync.': 12,
   'RPC Threads': 13,
-  'Number of threads for handling RPC calls.': 14,
+  'Raise this if dependent services or integrations make many RPC calls at once.': 14,
   'RPC Work Queue': 15,
-  'Depth of the work queue used to service RPC calls.': 16,
+  'How many RPC requests can wait for a free thread before elementsd starts rejecting new ones.': 16,
   'Maximum Connections': 17,
-  'Maximum number of peer connections to maintain.': 18,
+  'Fewer connections use less bandwidth and memory; more give the node more peers to receive blocks and transactions from.': 18,
 
   // actions/rpcConfig.ts
   Configuration: 19,
@@ -48,10 +48,10 @@ const dict = {
 
   // fileModels/elements.conf.ts + main.ts (disk / pruning)
   Pruning: 37,
-  'Maximum size of Liquid block data to keep on disk. Set to 0 to keep the entire sidechain (full archival). PeerSwap and other swap consumers only ever look back about an hour of blocks, so even the smallest prune target leaves them a wide margin.': 38,
+  'Maximum size of Liquid block data to keep on disk. Set to 0 to keep the entire sidechain (full archival). PeerSwap only ever looks back about an hour of blocks, so even the smallest prune target leaves it a wide margin.': 38,
   'Lowering this value on an already-synced node discards blocks immediately. Raising it, or switching back to full archival, requires a full re-sync. Pruning also disables the Transaction Index.': 39,
   'Transaction Index': 40,
-  'Build a complete index of every Liquid transaction, so `getrawtransaction` can look up any transaction by id alone. Not required by PeerSwap, and it adds several GB on top of an already large chain.': 41,
+  'Build a complete index of every Liquid transaction, so the getrawtransaction RPC can look up any transaction by its id alone. PeerSwap does not need it, and it takes disk space on top of the chain itself.': 41,
   'Not enough disk space': 42,
   'Disk Space': 43,
   'Only ${free} GB free. Stop Elements and free space — elementsd can corrupt its chain data if it runs the disk out.': 44,

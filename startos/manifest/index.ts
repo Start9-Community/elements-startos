@@ -32,5 +32,4 @@ export const manifest = setupManifest({
     // between the 2 and 4 GB tiers.
     ram: 3 * 1024 ** 3,
   },
-  dependencies: {},
 })

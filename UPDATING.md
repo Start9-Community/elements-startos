@@ -20,4 +20,4 @@ Release tags look like `elements-23.3.3`; the version is the part after `element
    tarballs exist for the new release.
 3. Bump the package version in `startos/versions/current.ts` (format
    `<upstream>:<revision>`, e.g. `23.3.3:1`) and add release notes.
-4. Run `npm run check` and `make` (requires `start-cli` + Docker).
+4. Run `make` (requires `start-cli` + Docker); its first step type-checks, lints and format-checks `startos/`.
